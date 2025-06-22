@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spoof My Run</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Introduction Modal -->
+    <div id="intro-modal" class="intro-modal">
+        <div class="intro-content">
+            <div class="intro-header">
+                <div class="logo-animation">
+                    <i class="fas fa-route"></i>
+                </div>
+                <h1 class="intro-title">Welcome to <span class="brand">Spoof My Run</span></h1>
+                <p class="intro-subtitle">Generate GPS data for any route or run :D</p>
+            </div>
+            
+            <div class="features-grid">
+                <div class="feature-card" data-delay="0.2s">
+                    <div class="feature-icon">
+                        <i class="fas fa-map-marked-alt"></i>
+                    </div>
+                    <h3>Interactive Route Creation</h3>
+                    <p>Click on the map to create custom routes with automatic road alignment</p>
+                </div>
+                
+                <div class="feature-card" data-delay="0.4s">
+                    <div class="feature-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>Realistic Pacing</h3>
+                    <p>Generate authentic pace variations and elevation profiles</p>
+                </div>
+                
+                <div class="feature-card" data-delay="0.6s">
+                    <div class="feature-icon">
+                        <i class="fas fa-download"></i>
+                    </div>
+                    <h3>Professional GPX Export</h3>
+                    <p>Export your routes as high-quality GPX files compatible with all fitness apps</p>
+                </div>
+            </div>
+            
+            <div class="getting-started">
+                <h2>Getting Started</h2>
+                <div class="steps">
+                    <div class="step" data-delay="0.8s">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Create Your Route</h4>
+                            <p>Click on the map to add waypoints or import an existing GPX file</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step" data-delay="1.0s">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Customize Details</h4>
+                            <p>Adjust pace, add variations, and set your run details</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step" data-delay="1.2s">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>Generate & Export</h4>
+                            <p>Download your professional GPX file and use it anywhere</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="intro-actions">
+                <button id="start-creating-btn" class="start-btn">
+                    <i class="fas fa-play"></i>
+                    Get Started
+                </button>
+                <button id="skip-intro-btn" class="skip-btn">
+                    Skip Introduction
+                </button>
+            </div>
+            
+            <div class="intro-github">
+                <a href="https://github.com/LivinDuck/spoofmyrun" target="_blank" rel="noopener noreferrer">
+                    <i class="fab fa-github"></i>
+                </a>
+            </div>
+        </div>
+        
+        <div class="intro-background">
+            <div class="floating-icon" style="top: 10%; left: 10%; animation-delay: 0s;">
+                <i class="fas fa-running"></i>
+            </div>
+            <div class="floating-icon" style="top: 20%; right: 15%; animation-delay: 1s;">
+                <i class="fas fa-route"></i>
+            </div>
+            <div class="floating-icon" style="bottom: 30%; left: 20%; animation-delay: 2s;">
+                <i class="fas fa-mountain"></i>
+            </div>
+            <div class="floating-icon" style="bottom: 15%; right: 10%; animation-delay: 3s;">
+                <i class="fas fa-stopwatch"></i>
+            </div>
+            <div class="floating-icon" style="top: 50%; left: 5%; animation-delay: 4s;">
+                <i class="fas fa-location-dot"></i>
+            </div>
+            <div class="floating-icon" style="top: 40%; right: 5%; animation-delay: 5s;">
+                <i class="fas fa-chart-area"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <header>
+            <h1 id="main-title">Spoof My Run</h1>
+        </header>
+        
+        <div class="main-content">
+            <!-- Left Panel - Route Drawing -->
+            <div class="left-panel">
+                <div class="section">
+                    <h2>Create Your Route</h2>
+                    <p>Click on the map to create your route, or import an existing GPX file</p>
+                    
+                    <div class="import-section">
+                        <label for="gpx-import" class="import-label">
+                            <i class="fas fa-upload"></i> Import GPX Route (Optional)
+                        </label>
+                        <input type="file" id="gpx-import" accept=".gpx" style="display: none;">
+                        <button id="import-btn" class="control-btn">
+                            <i class="fas fa-file-upload"></i> Import GPX
+                        </button>
+                    </div>
+                    
+                    <div class="map-controls">
+                        <button id="current-location-btn" class="control-btn" title="Go to current location">
+                            <i class="fas fa-location-arrow"></i> My Location
+                        </button>
+                        <button id="align-to-road-btn" class="control-btn" title="Toggle auto-align new points to roads">
+                            <i class="fas fa-road"></i> Align to Road
+                        </button>
+                        <button id="clear-route-btn" class="control-btn">
+                            <i class="fas fa-trash"></i> Clear Route
+                        </button>
+                        <button id="undo-btn" class="control-btn">
+                            <i class="fas fa-undo"></i> Undo
+                        </button>
+                        <button id="redo-btn" class="control-btn">
+                            <i class="fas fa-redo"></i> Redo
+                        </button>
+                        <button id="edit-nodes-btn" class="control-btn">
+                            <i class="fas fa-edit"></i> Edit Nodes
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="map"></div>
+            </div>
+            
+            <!-- Right Panel - Run Details -->
+            <div class="right-panel">
+                <div class="section">
+                    <h2>Run Details</h2>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-icon"><i class="fas fa-route"></i></div>
+                            <div class="stat-value" id="distance-value">0</div>
+                            <div class="stat-label">Distance</div>
+                        </div>
+                        
+                        <div class="stat-item">
+                            <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                            <div class="stat-value" id="duration-value">0:00</div>
+                            <div class="stat-label">Duration</div>
+                        </div>
+                        
+                        <div class="stat-item">
+                            <div class="stat-icon"><i class="fas fa-mountain"></i></div>
+                            <div class="stat-value" id="elevation-value">0m</div>
+                            <div class="stat-label">Elevation Gain</div>
+                        </div>
+                        
+                        <div class="stat-item">
+                            <div class="stat-icon"><i class="fas fa-running"></i></div>
+                            <div class="stat-value" id="pace-value">5:30</div>
+                            <div class="stat-label">/km</div>
+                        </div>
+                    </div>
+                    
+                    <div class="pace-section">
+                        <label for="pace-slider"><i class="fas fa-running"></i> Average Pace (/km)</label>
+                        <input type="range" id="pace-slider" min="180" max="720" step="5" value="330">
+                        <span id="pace-display">5:30 /km</span>
+                        
+                        <div class="pace-consistency">
+                            <label for="consistency-slider"><i class="fas fa-chart-line"></i> Pace Inconsistency</label>
+                            <input type="range" id="consistency-slider" min="0" max="50" value="0">
+                            <span id="consistency-display">0%</span>
+                            <p class="consistency-note">Constant pace throughout the run (most efficient)</p>
+                        </div>
+                    </div>
+                    
+                    <div class="run-details">
+                        <label for="run-name">Run Name</label>
+                        <input type="text" id="run-name" value="Morning Run" placeholder="Enter run name">
+                        
+                        <label for="run-date">Date</label>
+                        <input type="datetime-local" id="run-date">
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button id="generate-gpx-btn" class="primary-btn">
+                            <i class="fas fa-download"></i> Generate GPX
+                        </button>
+                        <button id="preview-btn" class="secondary-btn">
+                            <i class="fas fa-upload"></i> Export to Strava
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Data Visualization Section -->
+        <div class="visualization-section">
+            <div class="viz-container">
+                <h2>Data Visualization</h2>
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <h3>Pace Profile</h3>
+                        <span class="average-pace">Average: <span id="chart-average-pace">5:30 /km</span></span>
+                    </div>
+                    <canvas id="pace-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html> 
