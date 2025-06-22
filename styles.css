@@ -1442,8 +1442,27 @@ input[type="range"]::-moz-range-thumb:hover {
 }
 
 /* Map styles */
-.leaflet-container {
+.mapboxgl-map {
     border-radius: 0 0 12px 12px;
+}
+
+.mapboxgl-ctrl-group {
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.mapboxgl-ctrl-zoom-in,
+.mapboxgl-ctrl-zoom-out {
+    background: rgba(255, 255, 255, 0.9);
+    color: #2c3e50;
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.mapboxgl-ctrl-zoom-in:hover,
+.mapboxgl-ctrl-zoom-out:hover {
+    background: rgba(255, 255, 255, 1);
+    color: #ff5722;
 }
 
 .route-marker {
@@ -1613,6 +1632,13 @@ input[type="range"]::-moz-range-thumb:hover {
 #pace-chart {
     max-height: 300px;
     border-radius: 8px;
+}
+
+/* GPX download button disabled state */
+.gpx-btn-disabled {
+    opacity: 0.6;
+    cursor: not-allowed !important;
+    pointer-events: none;
 }
 
  

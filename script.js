@@ -1,11 +1,15 @@
 class FakeMyRun {
     constructor() {
+        // Set your Mapbox access token
+        mapboxgl.accessToken = 'YOURTOKENHERE'; 
+        
         this.map = null;
         this.routePoints = [];
-        this.routePolyline = null;
+        this.routeSource = null;
         this.markers = [];
         this.userLocation = null;
         this.elevationData = [];
+        this.elevationLoadingStates = []; // Track which elevations are still loading
         this.paceChart = null;
 
         // New Undo/Redo system
@@ -19,6 +23,7 @@ class FakeMyRun {
         this.markerClickInProgress = false; // Track if a marker click is being processed
         this.autoAlignToRoad = false; // Track if auto-align to road is enabled
         this.titleClickCount = 0; // Track clicks on title for easter egg
+        this.is3DEnabled = false; // Track if 3D mode is enabled
         
         // Check if this is first visit and show intro
         this.checkAndShowIntro();
@@ -498,17 +503,62 @@ class FakeMyRun {
     }
 
     initializeMap() {
-        // Initialize map - will center on user location if available
-        this.map = L.map('map').setView([48.8566, 2.3522], 11);
+        // Initialize Mapbox map
+        this.map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v12',
+            center: [2.3522, 48.8566], // Paris [longitude, latitude]
+            zoom: 11,
+            antialias: true // Smooth rendering
+        });
         
-        // Add OpenStreetMap tiles
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(this.map);
-
+        // Add navigation controls
+        this.map.addControl(new mapboxgl.NavigationControl());
+        
+        // Add custom 3D control
+        this.add3DControl();
+        
+        // Wait for map to load before adding event listeners
+        this.map.on('load', () => {
+            // Add route source and layer
+            this.map.addSource('route', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': []
+                    }
+                }
+            });
+            
+            this.map.addLayer({
+                'id': 'route',
+                'type': 'line',
+                'source': 'route',
+                'layout': {
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                },
+                'paint': {
+                    'line-color': '#ff5722',
+                    'line-width': 4,
+                    'line-opacity': 0.8
+                }
+            });
+        });
+        
         // Add click event for route drawing
         this.map.on('click', (e) => {
-            this.handleMapClick(e);
+            // Convert Mapbox event to Leaflet-like format for compatibility
+            const mapEvent = {
+                latlng: {
+                    lat: e.lngLat.lat,
+                    lng: e.lngLat.lng
+                }
+            };
+            this.handleMapClick(mapEvent);
         });
 
         // Don't request location during intro - will be called after intro is dismissed
@@ -616,6 +666,141 @@ class FakeMyRun {
         }
     }
 
+    add3DControl() {
+        class Toggle3DControl {
+            onAdd(map) {
+                this._map = map;
+                this._container = document.createElement('div');
+                this._container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group';
+                
+                this._button = document.createElement('button');
+                this._button.className = 'mapboxgl-ctrl-icon';
+                this._button.type = 'button';
+                this._button.title = 'Toggle 3D terrain and buildings';
+                this._button.innerHTML = '<i class="fas fa-cube"></i>';
+                this._button.style.fontSize = '14px';
+                this._button.style.display = 'flex';
+                this._button.style.alignItems = 'center';
+                this._button.style.justifyContent = 'center';
+                
+                this._button.addEventListener('click', () => {
+                    window.app.toggle3DView();
+                });
+                
+                this._container.appendChild(this._button);
+                return this._container;
+            }
+            
+            onRemove() {
+                this._container.parentNode.removeChild(this._container);
+                this._map = undefined;
+            }
+            
+            getButton() {
+                return this._button;
+            }
+        }
+        
+        this.toggle3DControl = new Toggle3DControl();
+        this.map.addControl(this.toggle3DControl, 'top-right');
+        
+        // Store reference globally so button can access toggle function
+        window.app = this;
+    }
+
+    toggle3DView() {
+        const btn = this.toggle3DControl.getButton();
+        
+        if (!this.is3DEnabled) {
+            // Enable 3D
+            this.is3DEnabled = true;
+            btn.innerHTML = '<i class="fas fa-times"></i>';
+            btn.style.backgroundColor = '#ff5722';
+            btn.style.color = 'white';
+            btn.title = 'Exit 3D view';
+            
+            // Add 3D terrain
+            this.map.addSource('mapbox-dem', {
+                'type': 'raster-dem',
+                'url': 'mapbox://mapbox.mapbox-terrain-dem-v1',
+                'tileSize': 512,
+                'maxzoom': 14
+            });
+            
+            this.map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 1.5 });
+            
+            // Add 3D buildings
+            const layers = this.map.getStyle().layers;
+            const labelLayerId = layers.find(
+                (layer) => layer.type === 'symbol' && layer.layout['text-field']
+            ).id;
+            
+            this.map.addLayer({
+                'id': 'add-3d-buildings',
+                'source': 'composite',
+                'source-layer': 'building',
+                'filter': ['==', 'extrude', 'true'],
+                'type': 'fill-extrusion',
+                'minzoom': 15,
+                'paint': {
+                    'fill-extrusion-color': '#aaa',
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['get', 'height']
+                    ],
+                    'fill-extrusion-base': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['get', 'min_height']
+                    ],
+                    'fill-extrusion-opacity': 0.6
+                }
+            }, labelLayerId);
+            
+            // Tilt map for 3D effect
+            this.map.easeTo({
+                pitch: 45,
+                bearing: 0,
+                duration: 1000
+            });
+            
+        } else {
+            // Disable 3D
+            this.is3DEnabled = false;
+            btn.innerHTML = '<i class="fas fa-cube"></i>';
+            btn.style.backgroundColor = '';
+            btn.style.color = '';
+            btn.title = 'Toggle 3D terrain and buildings';
+            
+            // Remove terrain
+            this.map.setTerrain(null);
+            if (this.map.getSource('mapbox-dem')) {
+                this.map.removeSource('mapbox-dem');
+            }
+            
+            // Remove 3D buildings
+            if (this.map.getLayer('add-3d-buildings')) {
+                this.map.removeLayer('add-3d-buildings');
+            }
+            
+            // Reset camera
+            this.map.easeTo({
+                pitch: 0,
+                bearing: 0,
+                duration: 1000
+            });
+        }
+    }
+
     async handleMapClick(e) {
         // Don't add points if we're dragging or a marker click is in progress
         if (this.isDragging || this.markerClickInProgress) {
@@ -628,27 +813,22 @@ class FakeMyRun {
         }
 
         if (this.isEditingNodes) {
-            // In editing mode: only insert nodes on route line, don't add new points at end
-            if (this.routePolyline && this.routePoints.length > 1) {
-                const clickPoint = e.latlng;
-                const insertIndex = this.findInsertionPoint(clickPoint);
-                
-                if (insertIndex !== -1) {
-                    this.insertRoutePoint(insertIndex, clickPoint);
-                    return;
-                }
-            }
-            // In editing mode, clicking elsewhere deselects nodes
+            // In editing mode, clicking deselects nodes
             this.selectedNodeIndex = -1;
             this.recreateMarkers();
         } else {
             // Normal mode: regular point addition with optional auto-align
-            if (this.autoAlignToRoad && this.routePoints.length > 0) {
-                // Auto-align is enabled and we have existing points - generate routed path
-                await this.addRoutedPoint(e.latlng);
-            } else {
-                // Either auto-align is off or this is the first point
-                this.addRoutePoint(e.latlng);
+            try {
+                if (this.autoAlignToRoad && this.routePoints.length > 0) {
+                    // Auto-align is enabled and we have existing points - generate routed path
+                    await this.addRoutedPoint(e.latlng);
+                } else {
+                    // Either auto-align is off or this is the first point
+                    await this.addRoutePoint(e.latlng);
+                }
+            } catch (error) {
+                console.error('Failed to add route point:', error);
+                alert('Unable to fetch elevation data. Please check your internet connection and try again.');
             }
         }
     }
@@ -678,119 +858,121 @@ class FakeMyRun {
         }
     }
 
-    findInsertionPoint(clickPoint) {
-        if (this.routePoints.length < 2) return -1;
 
-        let minDistance = Infinity;
-        let insertIndex = -1;
-        const threshold = 50; // pixels
 
-        for (let i = 0; i < this.routePoints.length - 1; i++) {
-            const start = this.routePoints[i];
-            const end = this.routePoints[i + 1];
-            
-            // Convert to screen coordinates
-            const startPixel = this.map.latLngToContainerPoint(start);
-            const endPixel = this.map.latLngToContainerPoint(end);
-            const clickPixel = this.map.latLngToContainerPoint(clickPoint);
-            
-            // Calculate distance from click to line segment
-            const distance = this.distanceToLineSegment(clickPixel, startPixel, endPixel);
-            
-            if (distance < threshold && distance < minDistance) {
-                minDistance = distance;
-                insertIndex = i + 1;
-            }
-        }
 
-        return insertIndex;
-    }
 
-    distanceToLineSegment(point, lineStart, lineEnd) {
-        const A = point.x - lineStart.x;
-        const B = point.y - lineStart.y;
-        const C = lineEnd.x - lineStart.x;
-        const D = lineEnd.y - lineStart.y;
 
-        const dot = A * C + B * D;
-        const lenSq = C * C + D * D;
-        
-        if (lenSq === 0) return Math.sqrt(A * A + B * B);
-        
-        let param = dot / lenSq;
-        
-        if (param < 0) {
-            return Math.sqrt(A * A + B * B);
-        } else if (param > 1) {
-            const dx = point.x - lineEnd.x;
-            const dy = point.y - lineEnd.y;
-            return Math.sqrt(dx * dx + dy * dy);
-        } else {
-            const projX = lineStart.x + param * C;
-            const projY = lineStart.y + param * D;
-            const dx = point.x - projX;
-            const dy = point.y - projY;
-            return Math.sqrt(dx * dx + dy * dy);
-        }
-    }
-
-    async insertRoutePoint(index, latlng) {
-        // Insert point at specified index
-        this.routePoints.splice(index, 0, latlng);
-        
-        // Get elevation for new point
-        await this.getElevationForPoint(latlng);
-        
-        // Select the newly inserted node (only in edit mode)
-        if (this.isEditingNodes) {
-            this.selectedNodeIndex = index;
-        }
-        
-        // Recreate all markers to maintain proper styling
-        this.recreateMarkers();
-        
-        // Update route line
-        this.updateRoutePolyline();
-        this.updateStats();
-        this.updatePaceChart();
-        
-        // Handle tutorial progression for edit mode
-        if (this.currentTutorialAction === 'waitForEdit') {
-            this.currentTutorialAction = null;
-            setTimeout(() => this.showTutorialStep7(), 1000);
-        }
-        
-        this.saveState();
-    }
 
     async addRoutePoint(latlng, skipStatesSave = false) {
+        const pointIndex = this.routePoints.length;
+        
+        // Add point immediately for instant visual feedback
         this.routePoints.push(latlng);
-
-        // Get elevation for this point
-        await this.getElevationForPoint(latlng);
+        this.elevationData.push(null); // Placeholder for elevation
+        this.elevationLoadingStates.push(true); // Mark as loading
 
         // Only set selection in editing mode
         if (this.isEditingNodes) {
             this.selectedNodeIndex = this.routePoints.length - 1;
         }
         
-        // Recreate all markers to maintain proper styling
+        // Immediately update display with loading state
         this.recreateMarkers();
-
-        // Update route line
         this.updateRoutePolyline();
         this.updateStats();
         this.updatePaceChart();
         
-        // Only save state if not skipping (to avoid multiple saves during routing)
+        // Fetch elevation in background.
+        // The background process will handle saving state for undo/redo.
+        // We only skip the final state save for intermediate points during auto-routing.
         if (!skipStatesSave) {
+            this.fetchElevationInBackground(pointIndex, latlng);
+        } else {
+            // For routed points, we'll fetch elevation in a batch later,
+            // so we just do nothing here. The calling function is responsible.
+        }
+    }
+
+    async fetchElevationInBackground(pointIndex, latlng) {
+        try {
+            const elevation = await this.fetchRealElevation(latlng);
+            
+            // Update elevation data
+            this.elevationData[pointIndex] = elevation;
+            this.elevationLoadingStates[pointIndex] = false;
+            
+            // Update display to show elevation is loaded
+            this.recreateMarkers();
+            this.updateStats();
+            this.updatePaceChart();
+            
+            // Save state after elevation is loaded
             this.saveState();
+            
+        } catch (error) {
+            console.error('Failed to fetch elevation for point:', error);
+            
+            // Mark as failed but keep the point
+            this.elevationData[pointIndex] = 100; // Reasonable default
+            this.elevationLoadingStates[pointIndex] = false;
+            
+            // Update display
+            this.recreateMarkers();
+            this.updateStats();
+            this.updatePaceChart();
+            
+            // Show user-friendly error message
+            this.showElevationError();
+        }
+    }
+
+    showElevationError() {
+        // Only show error once to avoid spam
+        if (!this.elevationErrorShown) {
+            this.elevationErrorShown = true;
+            
+            // Create a non-blocking notification
+            const notification = document.createElement('div');
+            notification.className = 'elevation-error-notification';
+            notification.innerHTML = `
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>Unable to fetch elevation data. Using default values.</span>
+                <button class="close-btn" onclick="this.parentElement.remove()">×</button>
+            `;
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #ff9800;
+                color: white;
+                padding: 12px 16px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                max-width: 300px;
+                animation: slideIn 0.3s ease-out;
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+                this.elevationErrorShown = false;
+            }, 5000);
         }
     }
 
     recreateMarkers() {
         // Remove all existing markers
-        this.markers.forEach(marker => this.map.removeLayer(marker));
+        this.markers.forEach(marker => marker.remove());
         this.markers = [];
 
         // Create new markers with proper styling
@@ -799,38 +981,69 @@ class FakeMyRun {
             const isNewest = !this.isEditingNodes && index === this.routePoints.length - 1;
             
             let markerColor = '#ff5722';
-            let fillColor = '#ff5722';
-            let radius = 6;
-            let weight = 2;
-            let fillOpacity = 0.8;
+            let size = 12;
+            let borderColor = 'white';
             
             if (isSelected) {
-                // Selected node in edit mode: lighter orange with glow effect
+                // Selected node in edit mode: lighter orange with larger size
                 markerColor = '#FFB74D';
-                fillColor = '#FFB74D';
-                radius = 8;
-                weight = 3;
-                fillOpacity = 1;
+                size = 16;
             } else if (isNewest) {
                 // Newest node in normal mode: amber highlight
-                fillColor = '#FF9800';
+                markerColor = '#FF9800';
             }
             
-            const marker = L.circleMarker(point, {
-                color: markerColor,
-                fillColor: fillColor,
-                fillOpacity: fillOpacity,
-                radius: radius,
-                weight: weight
-            }).addTo(this.map);
+            // Create a custom marker element
+            const el = document.createElement('div');
+            el.className = 'route-marker';
+            el.style.backgroundColor = markerColor;
+            el.style.width = size + 'px';
+            el.style.height = size + 'px';
+            el.style.borderRadius = '50%';
+            el.style.border = `2px solid ${borderColor}`;
+            el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+            el.style.cursor = this.isEditingNodes ? 'move' : 'default';
+            
+            const marker = new mapboxgl.Marker({
+                element: el,
+                draggable: this.isEditingNodes
+            })
+            .setLngLat([point.lng, point.lat])
+            .addTo(this.map);
 
             // Only add editing functionality in edit mode
             if (this.isEditingNodes) {
-                // Handle both selection and dragging with mousedown
-                marker.on('mousedown', (e) => {
-                    L.DomEvent.stopPropagation(e);
-                    L.DomEvent.preventDefault(e);
-                    this.handleNodeMouseDown(index, e);
+                let isDragging = false;
+                
+                marker.on('dragstart', () => {
+                    isDragging = true;
+                    this.selectedNodeIndex = index;
+                });
+                
+                marker.on('drag', () => {
+                    const lngLat = marker.getLngLat();
+                    this.routePoints[index] = { lat: lngLat.lat, lng: lngLat.lng };
+                    this.updateRoutePolyline();
+                });
+                
+                marker.on('dragend', () => {
+                    setTimeout(() => {
+                        isDragging = false;
+                        this.updateElevationForMovedNode(index).then(() => {
+                            this.updateStats();
+                            this.updatePaceChart();
+                            this.saveState();
+                        });
+                    }, 100);
+                });
+                
+                // Handle selection on click
+                el.addEventListener('click', (e) => {
+                    if (!isDragging) {
+                        e.stopPropagation();
+                        this.selectedNodeIndex = index;
+                        this.recreateMarkers();
+                    }
                 });
             }
 
@@ -923,22 +1136,44 @@ class FakeMyRun {
     }
 
     async updateElevationForMovedNode(nodeIndex) {
-        // Use fast fake elevation for moved nodes
-        const point = this.routePoints[nodeIndex];
-        this.elevationData[nodeIndex] = this.generateFakeElevation(point);
+        try {
+            const point = this.routePoints[nodeIndex];
+            const elevation = await this.fetchRealElevation(point);
+            this.elevationData[nodeIndex] = elevation;
+        } catch (error) {
+            console.error('Failed to fetch elevation for moved node:', error);
+            throw new Error('Unable to fetch elevation data. Please check your internet connection.');
+        }
     }
 
     updateRoutePolyline() {
-        if (this.routePolyline) {
-            this.map.removeLayer(this.routePolyline);
-        }
-
         if (this.routePoints.length > 1) {
-            this.routePolyline = L.polyline(this.routePoints, {
-                color: '#ff5722',
-                weight: 4,
-                opacity: 0.8
-            }).addTo(this.map);
+            // Convert route points to GeoJSON LineString coordinates [lng, lat]
+            const coordinates = this.routePoints.map(point => [point.lng, point.lat]);
+            
+            // Update the route source data
+            if (this.map.getSource('route')) {
+                this.map.getSource('route').setData({
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': coordinates
+                    }
+                });
+            }
+        } else {
+            // Clear the route if less than 2 points
+            if (this.map.getSource('route')) {
+                this.map.getSource('route').setData({
+                    'type': 'Feature',
+                    'properties': {},
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': []
+                    }
+                });
+            }
         }
     }
 
@@ -999,51 +1234,117 @@ class FakeMyRun {
         // Calculate real elevation gain from elevation data
         const elevationGain = this.calculateElevationGain();
         document.getElementById('elevation-value').textContent = elevationGain + 'm';
+        
+        // Update GPX button state
+        this.updateGPXButtonState();
+    }
+
+    updateGPXButtonState() {
+        const gpxButton = document.getElementById('generate-gpx-btn');
+        if (!gpxButton) return; // Button might not exist yet
+        
+        const loadingCount = this.elevationLoadingStates.filter(loading => loading).length;
+        
+        if (loadingCount > 0) {
+            gpxButton.classList.add('gpx-btn-disabled');
+            gpxButton.title = `Please wait, fetching elevation data...`;
+        } else {
+            gpxButton.classList.remove('gpx-btn-disabled');
+            gpxButton.title = 'Download your route as a GPX file';
+        }
     }
 
     async getElevationForPoint(latlng) {
-        // Always use fast fake elevation for instant response
-        const elevation = this.generateFakeElevation(latlng);
-        this.elevationData.push(elevation);
+        try {
+            const elevation = await this.fetchRealElevation(latlng);
+            this.elevationData.push(elevation);
+        } catch (error) {
+            console.error('Failed to fetch elevation data:', error);
+            throw new Error('Unable to fetch elevation data. Please check your internet connection.');
+        }
     }
 
-    generateFakeElevation(latlng) {
-        // Generate realistic-looking elevation based on coordinates
-        const lat = latlng.lat;
-        const lng = latlng.lng;
+    async fetchRealElevation(latlng) {
+        const lat = latlng.lat.toFixed(6);
+        const lng = latlng.lng.toFixed(6);
         
-        // Use coordinate-based seed for consistency
-        const seed1 = Math.sin(lat * 10) * Math.cos(lng * 10); // Much smaller multiplier for smoother changes
-        const seed2 = Math.sin(lat * 5) * Math.cos(lng * 5);   // Even smoother base terrain
+        const response = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`);
         
-        // Create realistic terrain elevation
-        const baseElevation = 100 + (seed1 * 50);  // Base: 50-150m (much smaller range)
-        const hillVariation = seed2 * 20;          // Hills: ±20m variation
-        const microVariation = (Math.random() - 0.5) * 5; // Small GPS noise: ±2.5m
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
-        const finalElevation = baseElevation + hillVariation + microVariation;
+        const data = await response.json();
         
-        // Ensure realistic elevation range (10-200m for typical urban/suburban areas)
-        return Math.max(10, Math.min(200, Math.round(finalElevation)));
+        if (data.error) {
+            throw new Error(data.reason || 'Unknown elevation API error');
+        }
+        
+        if (!data.elevation || data.elevation.length === 0) {
+            throw new Error('No elevation data returned');
+        }
+        
+        return Math.round(data.elevation[0]);
+    }
+
+    async fetchBatchElevations(latlngs) {
+        if (!latlngs || latlngs.length === 0) return [];
+        
+        // Open-Meteo supports up to 100 coordinates at once
+        const batchSize = 100;
+        const results = [];
+        
+        for (let i = 0; i < latlngs.length; i += batchSize) {
+            const batch = latlngs.slice(i, i + batchSize);
+            const latitudes = batch.map(ll => ll.lat.toFixed(6)).join(',');
+            const longitudes = batch.map(ll => ll.lng.toFixed(6)).join(',');
+            
+            const response = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${latitudes}&longitude=${longitudes}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.reason || 'Unknown elevation API error');
+            }
+            
+            if (!data.elevation || data.elevation.length !== batch.length) {
+                throw new Error('Elevation data count mismatch');
+            }
+            
+            results.push(...data.elevation.map(elev => Math.round(elev)));
+        }
+        
+        return results;
     }
 
     calculateElevationGain() {
         if (this.elevationData.length < 2) return 0;
         
-        // Only calculate elevation gain from the main route points, not detailed GPS points
-        // This prevents massive accumulation from thousands of micro-elevation changes
-        let totalGain = 0;
-        const smoothingThreshold = 3; // Only count elevation changes > 3m to avoid GPS noise
+        // Filter out null values (still loading)
+        const validElevations = [];
+        for (let i = 0; i < this.elevationData.length; i++) {
+            if (this.elevationData[i] !== null && this.elevationData[i] !== undefined) {
+                validElevations.push(this.elevationData[i]);
+            }
+        }
         
-        for (let i = 1; i < this.elevationData.length; i++) {
-            const gain = this.elevationData[i] - this.elevationData[i - 1];
+        if (validElevations.length < 2) return 0;
+        
+        let totalGain = 0;
+        const smoothingThreshold = 3; // Count elevation changes > 3m (filter GPS noise)
+        
+        for (let i = 1; i < validElevations.length; i++) {
+            const gain = validElevations[i] - validElevations[i - 1];
             if (gain > smoothingThreshold) {
                 totalGain += gain;
             }
         }
         
-        // Cap at realistic values for typical running routes
-        return Math.round(Math.min(totalGain, 500)); // Max 500m gain for sanity
+        return Math.round(totalGain);
     }
 
     formatPace(seconds) {
@@ -1170,17 +1471,19 @@ class FakeMyRun {
                 const lat = position.coords.latitude;
                 const lng = position.coords.longitude;
                 this.userLocation = { lat, lng };
-                this.map.setView([lat, lng], 15);
+                this.map.jumpTo({
+                    center: [lng, lat],
+                    zoom: 15
+                });
                 
                 // Add a marker for current location
-                L.marker([lat, lng], {
-                    icon: L.divIcon({
-                        className: 'current-location-marker',
-                        html: '<i class="fas fa-location-dot" style="color: #007bff; font-size: 16px;"></i>',
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10]
-                    })
-                }).addTo(this.map);
+                const el = document.createElement('div');
+                el.innerHTML = '<i class="fas fa-location-dot" style="color: #007bff; font-size: 16px;"></i>';
+                el.style.fontSize = '16px';
+                
+                new mapboxgl.Marker(el)
+                    .setLngLat([lng, lat])
+                    .addTo(this.map);
             }, (error) => {
                 console.warn('Unable to get your location:', error);
                 // Silently fail on initialization, don't show alert
@@ -1205,9 +1508,40 @@ class FakeMyRun {
             this.clearRoute();
 
             // Add imported points to route
+            const pointsNeedingElevation = [];
             for (const point of gpxPoints) {
                 this.routePoints.push({ lat: point.lat, lng: point.lng });
-                this.elevationData.push(point.elevation || 200);
+                
+                if (point.elevation !== null && point.elevation !== undefined) {
+                    this.elevationData.push(Math.round(point.elevation));
+                    this.elevationLoadingStates.push(false); // Not loading
+                } else {
+                    pointsNeedingElevation.push({ lat: point.lat, lng: point.lng, index: this.elevationData.length });
+                    this.elevationData.push(null); // Placeholder
+                    this.elevationLoadingStates.push(true); // Mark as loading
+                }
+            }
+
+            // Fetch elevation data for points that don't have it
+            if (pointsNeedingElevation.length > 0) {
+                try {
+                    const elevations = await this.fetchBatchElevations(pointsNeedingElevation);
+                    for (let i = 0; i < pointsNeedingElevation.length; i++) {
+                        const index = pointsNeedingElevation[i].index;
+                        this.elevationData[index] = elevations[i];
+                        this.elevationLoadingStates[index] = false; // Mark as loaded
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch elevation data for GPX import:', error);
+                    this.showElevationError();
+                    // Fill missing elevation data with reasonable defaults
+                    for (const point of pointsNeedingElevation) {
+                        if (this.elevationData[point.index] === null) {
+                            this.elevationData[point.index] = 100; // Default elevation
+                            this.elevationLoadingStates[point.index] = false; // Mark as loaded (with default)
+                        }
+                    }
+                }
             }
             
             // Recreate markers with proper styling
@@ -1220,9 +1554,12 @@ class FakeMyRun {
             this.updatePaceChart();
 
             // Fit map to show entire imported route
-            if (this.markers.length > 0) {
-                const group = new L.featureGroup(this.markers);
-                this.map.fitBounds(group.getBounds().pad(0.1));
+            if (this.routePoints.length > 0) {
+                const bounds = new mapboxgl.LngLatBounds();
+                this.routePoints.forEach(point => {
+                    bounds.extend([point.lng, point.lat]);
+                });
+                this.map.fitBounds(bounds, { padding: 50 });
             }
 
             // Update run name with imported file name
@@ -1369,38 +1706,25 @@ class FakeMyRun {
                 // Remove the first point since it's already in our route
                 const newPoints = routedPath.slice(1);
                 
-                // Add all the routed points to create a road-following path
-                // Skip state saves for intermediate points
+                // Add all routed points immediately for instant feedback
+                // but mark them to be skipped by the individual background fetch
                 for (let i = 0; i < newPoints.length; i++) {
-                    const isLastPoint = i === newPoints.length - 1;
-                    await this.addRoutePoint(
-                        { lat: newPoints[i].lat, lng: newPoints[i].lng }, 
-                        !isLastPoint // Skip state save for all but the last point
-                    );
+                    await this.addRoutePoint({ lat: newPoints[i].lat, lng: newPoints[i].lng }, true);
                 }
                 
-                console.log(`Added ${newPoints.length} routed points to stay on roads`);
+                // Fetch elevation data in a single background batch
+                const startIndex = this.routePoints.length - newPoints.length;
+                this.fetchBatchElevationsInBackground(newPoints, startIndex);
+
             } else {
-                // Fallback: simulate road snapping and add single point
-                const roadAdjustment = 0.0002; // ~20 meters
-                const angle = Math.floor(Math.random() * 8) * 45; // Grid-like adjustment
-                const adjustmentDistance = Math.random() * roadAdjustment;
-                
-                const latAdjustment = Math.cos(angle * Math.PI / 180) * adjustmentDistance;
-                const lngAdjustment = Math.sin(angle * Math.PI / 180) * adjustmentDistance;
-                
-                const adjustedPoint = {
-                    lat: targetPoint.lat + latAdjustment,
-                    lng: targetPoint.lng + lngAdjustment
-                };
-                
-                await this.addRoutePoint(adjustedPoint); // This will save state
+                // Fallback: could not route, add single point with background fetch
+                await this.addRoutePoint(targetPoint);
                 console.log('Used simulated road alignment for single point');
             }
         } catch (error) {
             console.warn('Routed point addition failed, adding original point:', error);
             // Fallback to adding the original point if routing fails
-            await this.addRoutePoint(targetPoint); // This will save state
+            await this.addRoutePoint(targetPoint); // This will save state via its background fetch
         } finally {
             // Restore button state
             alignBtn.innerHTML = originalText;
@@ -1408,16 +1732,46 @@ class FakeMyRun {
         }
     }
 
+    async fetchBatchElevationsInBackground(points, startIndex) {
+        try {
+            const elevations = await this.fetchBatchElevations(points);
+            
+            // Update elevation data for all routed points
+            for (let i = 0; i < points.length; i++) {
+                this.elevationData[startIndex + i] = elevations[i];
+                this.elevationLoadingStates[startIndex + i] = false;
+            }
+        } catch (error) {
+            console.error('Failed to fetch elevation data for routed points:', error);
+            this.showElevationError();
+            
+            // Use default elevation for failed points
+            for (let i = 0; i < points.length; i++) {
+                if (this.elevationData[startIndex + i] === null) {
+                    this.elevationData[startIndex + i] = 100; // Default
+                    this.elevationLoadingStates[startIndex + i] = false;
+                }
+            }
+        } finally {
+            // After batch is complete (success or fail), update UI and save state
+            this.recreateMarkers();
+            this.updateStats();
+            this.updatePaceChart();
+            this.saveState();
+        }
+    }
+    
     clearRoute() {
         this.routePoints = [];
         this.elevationData = [];
-        this.markers.forEach(marker => this.map.removeLayer(marker));
+        this.elevationLoadingStates = [];
+        
+        // Remove all Mapbox markers
+        this.markers.forEach(marker => marker.remove());
         this.markers = [];
         
-        if (this.routePolyline) {
-            this.map.removeLayer(this.routePolyline);
-            this.routePolyline = null;
-        }
+        // Clear the route source
+        this.updateRoutePolyline();
         
         this.updateStats();
         this.updatePaceChart();
@@ -1444,6 +1798,13 @@ class FakeMyRun {
     generateGPX() {
         if (this.routePoints.length < 2) {
             alert('Please add at least 2 points to generate a route');
+            return;
+        }
+
+        // Check if any elevations are still loading
+        const loadingCount = this.elevationLoadingStates.filter(loading => loading).length;
+        if (loadingCount > 0) {
+            alert(`Please wait for elevation data to load (${loadingCount} points remaining). You can download GPX once all elevations are ready.`);
             return;
         }
 
@@ -1661,4 +2022,3 @@ document.addEventListener('DOMContentLoaded', () => {
     window.fakeMyRun = new FakeMyRun();
 });
 
-// Click the "Spoof My Run" title 5 times to show the introduction again! 

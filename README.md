@@ -24,7 +24,16 @@ Use the publically accessable version of the website [here](https://spoofmy.run/
    cd spoof-my-run
    ```
 
-2. Open `index.html` in your web browser or serve with a local server:
+2. Get a Mapbox token:
+   - Sign up at [mapbox.com](https://www.mapbox.com/) (free tier available)
+   - Go to your [Account page](https://account.mapbox.com/access-tokens/)
+   - Create a new token or copy your default public token
+   - Open `script.js` and replace the token on line 3:
+   ```javascript
+   mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN_HERE';
+   ```
+
+3. Open `index.html` in your web browser or serve with a local server:
    ```bash
    # Using Python
    python -m http.server 8000
@@ -33,14 +42,14 @@ Use the publically accessable version of the website [here](https://spoofmy.run/
    npx serve .
    ```
 
-3. Navigate to `http://localhost:8000` in your browser
+4. Navigate to `http://localhost:8000` in your browser
 
 ### Dependencies
 All dependencies are loaded via CDN:
-- **Leaflet.js** - Interactive mapping
+- **Mapbox GL JS** - Interactive 3D mapping
 - **Chart.js** - Data visualization
 - **Font Awesome** - Icons
-- **OpenStreetMap** - Map tiles
+- **Open-Meteo API** - Real elevation data
 - **OSRM** - Routing service
 
 No build process or package installation required
